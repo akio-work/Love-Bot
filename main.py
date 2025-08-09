@@ -163,6 +163,11 @@ async def cmd_propose(message: Message):
     c = conn.cursor()
     lang, _ = get_lang_status(c, message.from_user.id)
 
+    if not message.text:
+        await message.reply("Будь ласка, введи команду разом з аргументами.")
+        conn.close()
+        return
+
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2:
         await message.reply("Вкажи користувача через @username, щоб зробити пропозицію.")
