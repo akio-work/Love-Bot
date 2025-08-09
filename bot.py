@@ -4,6 +4,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.filters import Command
 from aiogram.types import Message, BotCommand
 from database import get_db_connection
+from keep_alive import keep_alive  # Імпорт Flask-keep_alive
 
 API_TOKEN = "8232680735:AAG-GFL8ZOUla-OwP-0D5bDhnFpNaH6e-pU"
 
@@ -211,6 +212,7 @@ async def set_bot_commands():
     await bot.set_my_commands(commands)
 
 async def main():
+    keep_alive()  # Запускаємо Flask-сервер у окремому потоці
     await set_bot_commands()
     await dp.start_polling(bot)
 
