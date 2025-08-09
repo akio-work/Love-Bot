@@ -8,7 +8,7 @@ from database import (
     is_user_married, add_couple, remove_couple, get_couple_by_user, get_all_couples
 )
 
-API_TOKEN = "тут_твій_токен"
+API_TOKEN = "8232680735:AAG-GFL8ZOUla-OwP-0D5bDhnFpNaH6e-pU"
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
