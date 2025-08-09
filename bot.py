@@ -218,9 +218,11 @@ async def set_bot_commands():
     await bot.set_my_commands(commands)
 
 async def main():
-    keep_alive()
+    keep_alive()  # запускаємо Flask у потоці
     await set_bot_commands()
+    print("[BOT] Бот запущено!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
+    import asyncio
     asyncio.run(main())
