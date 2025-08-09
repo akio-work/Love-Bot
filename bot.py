@@ -3,8 +3,8 @@ from datetime import datetime
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command
 from aiogram.types import Message, BotCommand
-from database import get_db_connection
-from keep_alive import keep_alive  # Імпорт Flask-keep_alive
+from database import get_db_connection  # Твоя база
+from keep_alive import keep_alive  # Flask сервер
 
 API_TOKEN = "8232680735:AAG-GFL8ZOUla-OwP-0D5bDhnFpNaH6e-pU"
 
@@ -94,7 +94,6 @@ async def cmd_marry(message: Message):
         conn.close()
         return
 
-    # Для простоти — одружуємо користувача з самим собою (поправиш під реальний процес, де потрібна пропозиція)
     wed_date = datetime.now().isoformat()
     c.execute('INSERT INTO couples (user1_id, user2_id, wed_date) VALUES (?, ?, ?)', (user_id, user_id, wed_date))
     c.execute('INSERT OR IGNORE INTO users (user_id, status) VALUES (?, ?)', (user_id, "Одружений(а)"))
@@ -106,7 +105,7 @@ async def cmd_marry(message: Message):
     couple_name = f"{user_name} ❤️ {user_name}"
 
     await message.answer(MESSAGES["uk"]["marry_start"].format(couple=couple_name))
-    await asyncio.sleep(5)  # Затримка 5 секунд
+    await asyncio.sleep(5)
     await message.answer(MESSAGES["uk"]["marry_success"].format(couple=couple_name))
 
 @dp.message(Command("topcouples"))
