@@ -4,14 +4,14 @@ from datetime import datetime
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
-from keep_alive import keep_alive  # імпорт з файлу з вебсервером
+from keep_alive import keep_alive
 
 API_TOKEN = "8232680735:AAG-GFL8ZOUla-OwP-0D5bDhnFpNaH6e-pU"
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-pending_proposals = {}  # proposal_id -> (proposer_id, proposee_username)
+pending_proposals = {}
 
 MESSAGES = {
     "uk": {
@@ -71,17 +71,14 @@ def get_db(chat_id: int):
         PRIMARY KEY (user1_id, user2_id)
     )
     """)
+
     c.execute("""
     CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
-        lang TEXT DEFAULT 'uk'
+        lang TEXT DEFAULT 'uk',
+        status TEXT DEFAULT 'Вільний(а)'
     )
     """)
-
-    c.execute("PRAGMA table_info(users)")
-    columns = [row[1] for row in c.fetchall()]
-    if "status" not in columns:
-        c.execute("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'Вільний(а)'")
 
     conn.commit()
     return conn
@@ -106,6 +103,7 @@ def format_duration(start_time: datetime):
     now = datetime.now()
     diff = now - start_time
     minutes = int(diff.total_seconds() // 60)
+
     if minutes < 60:
         return f"{minutes} хвилин"
     hours = minutes // 60
@@ -362,24 +360,23 @@ async def cmd_profile(message: Message):
     c.execute('SELECT user1_id, user2_id, wed_date FROM couples WHERE user1_id = ? OR user2_id = ?', (user_id, user_id))
     row = c.fetchone()
     if not row:
-        await message.answer(MESSAGES[lang]["no_spouse"])
+        await message.answer(MESSAGES[lang]["profile_no_marriage"])
         conn.close()
         return
 
     user1_id, user2_id, wed_date_str = row
+    wed_date = datetime.fromisoformat(wed_date_str)
     spouse_id = user2_id if user1_id == user_id else user1_id
     spouse_name = await get_user_name(message.chat.id, spouse_id)
-    wed_date = datetime.fromisoformat(wed_date_str)
-    wed_since = wed_date.strftime("%d.%m.%Y")
 
-    text = (
+    profile_text = (
         MESSAGES[lang]["profile_header"] +
-        f"🆔 ID: {user_id}\n" +
         MESSAGES[lang]["profile_status"].format(status=status) +
         MESSAGES[lang]["profile_married_to"].format(partner=spouse_name) +
-        MESSAGES[lang]["profile_married_since"].format(since=wed_since)
+        MESSAGES[lang]["profile_married_since"].format(since=wed_date.strftime("%d.%m.%Y"))
     )
-    await message.answer(text)
+
+    await message.answer(profile_text)
     conn.close()
 
 async def set_bot_commands():
@@ -396,9 +393,9 @@ async def set_bot_commands():
     await bot.set_my_commands(commands)
 
 async def main():
-    keep_alive()
     await set_bot_commands()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
+    keep_alive()
     asyncio.run(main())
