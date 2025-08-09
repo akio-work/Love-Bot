@@ -140,37 +140,37 @@ async def marry_callback(call: CallbackQuery):
 @dp.message(Command("profile"))
 async def cmd_profile(message: Message):
     conn = get_db(message.chat.id)
+    if not conn:
+        await message.answer("❌ Помилка бази даних.")
+        return
+
     user_id = message.from_user.id
     update_last_active(conn, user_id)
 
     couple = get_couple(conn, user_id)
-    if not couple:
-        await message.answer("😢 Ви поки не одружені.")
-        conn.close()
-        return
 
-    user1_id, user2_id, wed_date_str = couple
-    wed_date = datetime.fromisoformat(wed_date_str)
-    spouse_id = user2_id if user1_id == user_id else user1_id
-    spouse_name = (await bot.get_chat_member(message.chat.id, spouse_id)).user.full_name
+    last_active_str = get_last_active(conn, user_id)
+    last_active = last_active_str if last_active_str else "Немає даних"
 
-    last_active = update_last_active(conn, user_id)
-    last_active_time = None
-    c = conn.cursor()
-    c.execute("SELECT last_active FROM users WHERE user_id = ?", (user_id,))
-    row = c.fetchone()
-    if row and row[0]:
-        last_active_time = datetime.fromisoformat(row[0])
-    active_str = last_active_time.strftime("%d.%m.%Y %H:%M") if last_active_time else "немає даних"
+    if couple:
+        user1_id, user2_id, wed_date_str = couple
+        wed_date = datetime.fromisoformat(wed_date_str)
+        spouse_id = user2_id if user1_id == user_id else user1_id
+        spouse_name = await safe_get_full_name(message.chat.id, spouse_id)
+        duration = format_duration(wed_date)
 
-    duration_str = format_duration(wed_date)
-
-    profile_text = (
-        f"📇 Ваш профіль:\n"
-        f"💖 Одружені з: {spouse_name}\n"
-        f"❤️ В шлюбі вже: {duration_str}\n"
-        f"⏰ Остання активність у групі: {active_str}"
-    )
+        profile_text = (
+            f"📇 Профіль:\n"
+            f"Одружений(а) з: {spouse_name}\n"
+            f"Разом вже: {duration}\n"
+            f"Остання активність: {last_active}\n"
+        )
+    else:
+        profile_text = (
+            f"📇 Профіль:\n"
+            f"Статус: Вільний(а)\n"
+            f"Остання активність: {last_active}\n"
+        )
 
     await message.answer(profile_text)
     conn.close()
