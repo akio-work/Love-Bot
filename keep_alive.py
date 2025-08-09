@@ -1,15 +1,16 @@
-from aiohttp import web
-import asyncio
+from flask import Flask
+from threading import Thread
 
-async def handle(request):
-    return web.Response(text="Bot is alive!")
+app = Flask("")
+
+@app.route("/")
+def home():
+    return "Я живу, як класика — вічна і світла!"
+
+def run():
+    app.run(host="0.0.0.0", port=8080)
 
 def keep_alive():
-    app = web.Application()
-    app.add_routes([web.get('/', handle)])
-    runner = web.AppRunner(app)
-
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(runner.setup())
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
-    loop.run_until_complete(site.start())
+    t = Thread(target=run)
+    t.daemon = True
+    t.start()
