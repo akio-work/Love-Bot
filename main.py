@@ -4,23 +4,7 @@ from datetime import datetime
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
-from flask import Flask
-from threading import Thread
-
-# ----------------- 1. KEEP ALIVE -----------------
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Бот працює 24/7 🔥"
-
-def run():
-    app.run(host='0.0.0.0', port=8080)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
-# --------------------------------------------------
+from keep_alive import keep_alive  # імпорт з файлу з вебсервером
 
 API_TOKEN = "8232680735:AAG-GFL8ZOUla-OwP-0D5bDhnFpNaH6e-pU"
 
@@ -79,7 +63,6 @@ def get_db(chat_id: int):
     conn = sqlite3.connect(db_name)
     c = conn.cursor()
 
-    # Створюємо таблицю пар, якщо нема
     c.execute("""
     CREATE TABLE IF NOT EXISTS couples (
         user1_id INTEGER NOT NULL,
@@ -88,8 +71,6 @@ def get_db(chat_id: int):
         PRIMARY KEY (user1_id, user2_id)
     )
     """)
-
-    # Створюємо таблицю юзерів, якщо нема
     c.execute("""
     CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
@@ -97,7 +78,6 @@ def get_db(chat_id: int):
     )
     """)
 
-    # Перевіряємо, чи є колонка status, якщо нема — додаємо
     c.execute("PRAGMA table_info(users)")
     columns = [row[1] for row in c.fetchall()]
     if "status" not in columns:
@@ -126,7 +106,6 @@ def format_duration(start_time: datetime):
     now = datetime.now()
     diff = now - start_time
     minutes = int(diff.total_seconds() // 60)
-
     if minutes < 60:
         return f"{minutes} хвилин"
     hours = minutes // 60
@@ -400,7 +379,6 @@ async def cmd_profile(message: Message):
         MESSAGES[lang]["profile_married_to"].format(partner=spouse_name) +
         MESSAGES[lang]["profile_married_since"].format(since=wed_since)
     )
-
     await message.answer(text)
     conn.close()
 
@@ -418,9 +396,9 @@ async def set_bot_commands():
     await bot.set_my_commands(commands)
 
 async def main():
+    keep_alive()
     await set_bot_commands()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    keep_alive()  # Запускаємо вебсервер для підтримки живучості на Replit
     asyncio.run(main())
