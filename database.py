@@ -6,7 +6,6 @@ def get_db(chat_id: int):
     conn = sqlite3.connect(db_name)
     c = conn.cursor()
 
-    # Таблиця пар (заручені/одружені)
     c.execute("""
     CREATE TABLE IF NOT EXISTS couples (
         user1_id INTEGER NOT NULL,
@@ -16,53 +15,56 @@ def get_db(chat_id: int):
     )
     """)
 
-    # Таблиця користувачів (для активності)
     c.execute("""
     CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
-        last_active TEXT
+        lang TEXT DEFAULT 'uk',
+        status TEXT DEFAULT 'Вільний(а)'
     )
     """)
 
     conn.commit()
     return conn
 
-def update_last_active(conn, user_id: int):
-    c = conn.cursor()
-    now_str = datetime.now().isoformat()
-    c.execute("INSERT OR REPLACE INTO users (user_id, last_active) VALUES (?, ?)", (user_id, now_str))
-    conn.commit()
-
-def get_last_active(conn, user_id: int):
-    c = conn.cursor()
-    c.execute("SELECT last_active FROM users WHERE user_id = ?", (user_id,))
-    row = c.fetchone()
-    if row and row[0]:
-        return datetime.fromisoformat(row[0])
-    return None
-
-def add_couple(conn, user1_id: int, user2_id: int):
-    c = conn.cursor()
-    user1, user2 = sorted([user1_id, user2_id])
-    now_str = datetime.now().isoformat()
-    try:
-        c.execute('INSERT INTO couples (user1_id, user2_id, wed_date) VALUES (?, ?, ?)', (user1, user2, now_str))
-        conn.commit()
-        return True
-    except sqlite3.IntegrityError:
-        return False
+def get_lang_status(cursor, user_id: int):
+    cursor.execute("SELECT lang, status FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    if row:
+        lang = row[0] if row[0] else "uk"
+        status = row[1] if row[1] else "Вільний(а)"
+        return lang, status
+    return "uk", "Вільний(а)"
 
 def get_couple(conn, user_id: int):
     c = conn.cursor()
     c.execute('SELECT user1_id, user2_id, wed_date FROM couples WHERE user1_id = ? OR user2_id = ?', (user_id, user_id))
     return c.fetchone()
 
-def remove_couple(conn, user_id: int):
+def add_couple(conn, user1_id: int, user2_id: int):
     c = conn.cursor()
-    couple = get_couple(conn, user_id)
-    if couple:
-        user1, user2, _ = couple
-        c.execute('DELETE FROM couples WHERE user1_id = ? AND user2_id = ?', (user1, user2))
+    user1, user2 = min(user1_id, user2_id), max(user1_id, user2_id)
+    now_str = datetime.now().isoformat()
+    try:
+        c.execute('INSERT INTO couples (user1_id, user2_id, wed_date) VALUES (?, ?, ?)', (user1, user2, now_str))
+        c.execute("INSERT OR REPLACE INTO users (user_id, lang, status) VALUES (?, COALESCE((SELECT lang FROM users WHERE user_id=?), 'uk'), ?)", (user1, user1, "Одружений(а)"))
+        c.execute("INSERT OR REPLACE INTO users (user_id, lang, status) VALUES (?, COALESCE((SELECT lang FROM users WHERE user_id=?), 'uk'), ?)", (user2, user2, "Одружений(а)"))
         conn.commit()
-        return True
-    return False
+    except sqlite3.IntegrityError:
+        pass
+
+def update_status_free(conn, user_ids):
+    c = conn.cursor()
+    c.execute("UPDATE users SET status = 'Вільний(а)' WHERE user_id IN ({seq})".format(
+        seq=','.join(['?']*len(user_ids))), user_ids)
+    conn.commit()
+
+def update_status_married(conn, user1_id, user2_id):
+    c = conn.cursor()
+    c.execute("UPDATE users SET status = 'Одружений(а)' WHERE user_id IN (?, ?)", (user1_id, user2_id))
+    conn.commit()
+
+def delete_couple(conn, user1_id, user2_id):
+    c = conn.cursor()
+    user1, user2 = min(user1_id, user2_id), max(user1_id, user2_id)
+    c.execute('DELETE FROM couples WHERE user1_id = ? AND user2_id = ?', (user1, user2))
+    conn.commit()
