@@ -4,7 +4,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from database import get_db, get_lang_status
-from keep_alive import keep_alive
+from keep_alive import keep_alive  # якщо є твій keep_alive
 
 API_TOKEN = "8232680735:AAG-GFL8ZOUla-OwP-0D5bDhnFpNaH6e-pU"
 
@@ -15,9 +15,9 @@ pending_proposals = {}
 
 MESSAGES = {
     "uk": {
-        "proposal_offer": "💌 {target}, пропозиція руки і серця від {proposer}! Натисни ❤️ щоб погодитись або ❌ щоб відмовитись.",
+        "proposal_offer": "💌 @{target}, пропозиція руки і серця від {proposer}! Натисни ❤️ щоб погодитись або ❌ щоб відмовитись.",
         "proposal_accepted": "🎉 {couple}, тепер одружені! Нехай щастить у любові! 💖",
-        "proposal_declined": "🚫 {target} відмовив(ла) {proposer}.",
+        "proposal_declined": "🚫 @{target} відмовив(ла) {proposer}.",
         "self_propose": "🙅‍♂️ Не можна пропонувати собі.",
         "wedding_in_progress": "⏳ Весілля вже триває, зачекай.",
         "wedding_start": "💒 Починаємо весільне гуляння для {couple}! 🎉",
@@ -54,6 +54,8 @@ MESSAGES = {
 async def get_user_name(chat_id: int, user_id: int):
     try:
         member = await bot.get_chat_member(chat_id, user_id)
+        if member.user.username:
+            return f"@{member.user.username}"
         return member.user.full_name
     except:
         return f"Користувач {user_id}"
@@ -79,7 +81,7 @@ def format_duration(start_time: datetime):
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
-    conn = get_db(message.chat.id)
+    conn = get_db()
     c = conn.cursor()
     lang, _ = get_lang_status(c, message.from_user.id)
     await message.answer(MESSAGES[lang]["help_dm"])
@@ -87,7 +89,7 @@ async def cmd_start(message: Message):
 
 @dp.message(Command("commands"))
 async def cmd_commands(message: Message):
-    conn = get_db(message.chat.id)
+    conn = get_db()
     c = conn.cursor()
     lang, _ = get_lang_status(c, message.from_user.id)
     await message.answer(MESSAGES[lang]["commands_list"])
@@ -95,7 +97,7 @@ async def cmd_commands(message: Message):
 
 @dp.message(Command("marry"))
 async def cmd_marry(message: Message):
-    conn = get_db(message.chat.id)
+    conn = get_db()
     c = conn.cursor()
     lang, _ = get_lang_status(c, message.from_user.id)
 
@@ -125,49 +127,36 @@ async def cmd_marry(message: Message):
         conn.close()
         return
 
-    # Пошук user_id за username
-    c.execute("SELECT user_id FROM users WHERE user_id = ?", (proposer_id,))
-    if not c.fetchone():
-        c.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (proposer_id,))
-
+    # Шукаємо user_id цільового
     try:
-        member = await bot.get_chat_member(message.chat.id, message.from_user.id)
-        # Знаходимо user_id цільового
-        target_user = None
-        async for member_obj in bot.get_chat_administrators(message.chat.id):
-            if member_obj.user.username and member_obj.user.username.lower() == username.lower():
-                target_user = member_obj.user
-                break
+        chat_members = await bot.get_chat_administrators(message.chat.id)
+        target_user = next((m.user for m in chat_members if m.user.username and m.user.username.lower() == username.lower()), None)
     except:
         target_user = None
 
-    # Якщо не знайшли користувача, то пішли по базі
-    if target_user is None:
-        # Використовуємо Telegram API щоб знайти
-        try:
-            from aiogram.types import ChatMemberUpdated
-            # Ні, це не дуже просто, тому відправимо повідомлення з пропозицією і будемо чекати підтвердження по кнопці
-        except:
-            await message.reply("Не вдалося знайти користувача в чаті.")
-            conn.close()
-            return
+    if not target_user:
+        await message.reply("Користувача не знайдено в чаті.")
+        conn.close()
+        return
 
-    # Для простоти візьмемо user_id як цільовий, якщо немає точного
-    target_user = None
-    # Візьмемо username з повідомлення і будемо чекати підтвердження
+    # Зберігаємо користувачів у базі, якщо їх там нема
+    for user in [message.from_user, target_user]:
+        c.execute("INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)", (user.id, user.username or ""))
+
+    conn.commit()
 
     # Створюємо інлайн клавіатуру для підтвердження
     proposal_id = f"{message.chat.id}_{message.message_id}"
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="❤️", callback_data=f"proposal_accept:{proposal_id}:{proposer_id}:{username}"),
-            InlineKeyboardButton(text="❌", callback_data=f"proposal_decline:{proposal_id}:{proposer_id}:{username}")
+            InlineKeyboardButton(text="❤️", callback_data=f"proposal_accept:{proposal_id}:{proposer_id}:{target_user.id}"),
+            InlineKeyboardButton(text="❌", callback_data=f"proposal_decline:{proposal_id}:{proposer_id}:{target_user.id}")
         ]
     ])
 
-    text = MESSAGES[lang]["proposal_offer"].format(target=f"@{username}", proposer=message.from_user.full_name)
+    text = MESSAGES[lang]["proposal_offer"].format(target=target_user.username or target_user.full_name, proposer=message.from_user.full_name)
     await message.answer(text, reply_markup=kb)
-    pending_proposals[proposal_id] = (proposer_id, username)
+    pending_proposals[proposal_id] = (proposer_id, target_user.id)
 
     conn.close()
 
@@ -177,13 +166,13 @@ async def proposal_callback(call: CallbackQuery):
     action = data[0].split("_")[1]
     proposal_id = data[1]
     proposer_id = int(data[2])
-    username = data[3]
+    target_user_id = int(data[3])
 
-    conn = get_db(call.message.chat.id)
+    conn = get_db()
     c = conn.cursor()
     lang, _ = get_lang_status(c, call.from_user.id)
 
-    if call.from_user.username != username:
+    if call.from_user.id != target_user_id:
         await call.answer("Це не ваша пропозиція!", show_alert=True)
         conn.close()
         return
@@ -199,17 +188,16 @@ async def proposal_callback(call: CallbackQuery):
         now_str = datetime.now().isoformat()
         try:
             c.execute('INSERT INTO couples (user1_id, user2_id, wed_date) VALUES (?, ?, ?)', (user1_id, user2_id, now_str))
-            c.execute("INSERT OR REPLACE INTO users (user_id, lang, status) VALUES (?, COALESCE((SELECT lang FROM users WHERE user_id=?), 'uk'), 'Одружений(а)')", (user1_id, user1_id))
-            c.execute("INSERT OR REPLACE INTO users (user_id, lang, status) VALUES (?, COALESCE((SELECT lang FROM users WHERE user_id=?), 'uk'), 'Одружений(а)')", (user2_id, user2_id))
+            c.execute("UPDATE users SET status = 'Одружений(а)' WHERE user_id IN (?, ?)", (user1_id, user2_id))
             conn.commit()
         except sqlite3.IntegrityError:
             pass
 
         proposer_name = await get_user_name(call.message.chat.id, proposer_id)
         target_name = await get_user_name(call.message.chat.id, call.from_user.id)
-        couple_name = f"[{target_name}](tg://user?id={call.from_user.id}) і [{proposer_name}](tg://user?id={proposer_id})"
+        couple_name = f"{proposer_name} і {target_name}"
 
-        await call.message.edit_text(MESSAGES[lang]["proposal_accepted"].format(couple=couple_name), parse_mode="Markdown")
+        await call.message.edit_text(MESSAGES[lang]["proposal_accepted"].format(couple=couple_name))
 
         # Після 5 секунд влаштовуємо весільний текст
         await asyncio.sleep(5)
@@ -222,13 +210,15 @@ async def proposal_callback(call: CallbackQuery):
             "Цей день запам’ятається назавжди! 🎆"
         ]
         for text in wedding_texts:
-            await call.message.answer(text, parse_mode="Markdown")
+            await call.message.answer(text)
             await asyncio.sleep(4)
 
         pending_proposals.pop(proposal_id, None)
-    else:
+
+    else:  # decline
         proposer_name = await get_user_name(call.message.chat.id, proposer_id)
-        text = MESSAGES[lang]["proposal_declined"].format(target=call.from_user.full_name, proposer=proposer_name)
+        target_name = await get_user_name(call.message.chat.id, call.from_user.id)
+        text = MESSAGES[lang]["proposal_declined"].format(target=target_name, proposer=proposer_name)
         await call.message.edit_text(text)
         pending_proposals.pop(proposal_id, None)
 
@@ -237,7 +227,7 @@ async def proposal_callback(call: CallbackQuery):
 
 @dp.message(Command("topcouples"))
 async def cmd_topcouples(message: Message):
-    conn = get_db(message.chat.id)
+    conn = get_db()
     c = conn.cursor()
     lang, _ = get_lang_status(c, message.from_user.id)
 
@@ -263,7 +253,7 @@ async def cmd_topcouples(message: Message):
 
 @dp.message(Command("divorce"))
 async def cmd_divorce(message: Message):
-    conn = get_db(message.chat.id)
+    conn = get_db()
     c = conn.cursor()
     lang, _ = get_lang_status(c, message.from_user.id)
     user_id = message.from_user.id
@@ -289,7 +279,7 @@ async def cmd_divorce(message: Message):
 
 @dp.message(Command("profile"))
 async def cmd_profile(message: Message):
-    conn = get_db(message.chat.id)
+    conn = get_db()
     c = conn.cursor()
     lang, status = get_lang_status(c, message.from_user.id)
     user_id = message.from_user.id
@@ -330,8 +320,10 @@ async def set_bot_commands():
     await bot.set_my_commands(commands)
 
 async def main():
+    # ВИДАЛЯЄМО WEBHOOK (щоб не було конфліктів при polling)
+    await bot.delete_webhook(drop_pending_updates=True)
     await set_bot_commands()
-    await dp.start_polling(bot)  # Polling
+    await dp.start_polling(bot)  # Запускаємо polling
 
 if __name__ == "__main__":
     keep_alive()
