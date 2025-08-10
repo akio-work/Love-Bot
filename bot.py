@@ -331,10 +331,10 @@ async def set_bot_commands():
 # --- Вебхук --- 
 
 @app.route(f"/webhook/{API_TOKEN}", methods=["POST"])
-async def webhook():
-    json_update = await request.get_json()
+def webhook():
+    json_update = request.get_json()
     update = types.Update(**json_update)
-    await dp.feed_update(update)
+    asyncio.create_task(dp.feed_update(update))  # не чекаємо, а запускаємо таск
     return Response("OK", status=200)
 
 if __name__ == "__main__":
