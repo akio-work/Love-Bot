@@ -5,12 +5,12 @@ import sqlite3
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
-from flask import Flask, request
+from flask import Flask, request, Response
 
 API_TOKEN = "8232680735:AAG-GFL8ZOUla-OwP-0D5bDhnFpNaH6e-pU"
 
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(bot=bot)
 
 app = Flask(__name__)
 
@@ -34,7 +34,6 @@ CREATE TABLE IF NOT EXISTS users (
 """)
 conn.commit()
 
-# --- Повідомлення ---
 MESSAGES = {
     "uk": {
         "proposal_offer": "{target}, вам роблять пропозицію руки і серця від {proposer}!\nНатисніть ✅ якщо згодні, або ❌ якщо ні.",
@@ -333,9 +332,10 @@ async def set_bot_commands():
 
 @app.route(f"/webhook/{API_TOKEN}", methods=["POST"])
 async def webhook():
-    update = types.Update(**request.json)
+    json_update = await request.get_json()
+    update = types.Update(**json_update)
     await dp.feed_update(update)
-    return "OK"
+    return Response("OK", status=200)
 
 if __name__ == "__main__":
     import logging
