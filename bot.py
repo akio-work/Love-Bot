@@ -1,57 +1,84 @@
 import asyncio
+import sqlite3
 from datetime import datetime
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher
 from aiogram.filters import Command
-from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
-from database import get_db, get_lang_status, get_couple, add_couple, update_status_free, update_status_married, delete_couple
-from keep_alive import keep_alive
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 
 API_TOKEN = "8232680735:AAG-GFL8ZOUla-OwP-0D5bDhnFpNaH6e-pU"
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
+# --- БАЗА ---
+conn = sqlite3.connect("wedding_bot.db")
+c = conn.cursor()
+
+# Таблиця пар, тепер з chat_id
+c.execute("""
+CREATE TABLE IF NOT EXISTS couples (
+    chat_id INTEGER NOT NULL,
+    user1_id INTEGER NOT NULL,
+    user2_id INTEGER NOT NULL,
+    wed_date TEXT NOT NULL,
+    PRIMARY KEY (chat_id, user1_id, user2_id)
+)
+""")
+
+# Таблиця профілів — окремо на кожного юзера в певній групі
+c.execute("""
+CREATE TABLE IF NOT EXISTS profiles (
+    chat_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    lang TEXT DEFAULT 'uk',
+    PRIMARY KEY (chat_id, user_id)
+)
+""")
+
+conn.commit()
+
+def get_lang(chat_id: int, user_id: int):
+    c.execute("SELECT lang FROM profiles WHERE chat_id = ? AND user_id = ?", (chat_id, user_id))
+    row = c.fetchone()
+    return row[0] if row else "uk"
+
+def set_lang(chat_id: int, user_id: int, lang: str):
+    c.execute(
+        "INSERT OR REPLACE INTO profiles (chat_id, user_id, lang) VALUES (?, ?, ?)",
+        (chat_id, user_id, lang)
+    )
+    conn.commit()
+
 MESSAGES = {
     "uk": {
+        "proposal_offer": "{target}, вам роблять пропозицію руки і серця від {proposer}!\nНатисніть ✅ якщо згодні, або ❌ якщо ні.",
+        "proposal_accepted": "🎉 {couple}, ви тепер заручені! Готуйтеся до великого свята! 💖",
+        "proposal_declined": "{target} відмовив(ла) {proposer}.",
+        "self_propose": "Не можна пропонувати собі.",
+        "not_engaged_for_marry": "Ви ще не заручені, щоб почати весілля!",
+        "wedding_in_progress": "Весілля вже триває, будь ласка, зачекайте.",
+        "wedding_start": "💒 Розпочинаємо весільне гуляння для {couple}! 🎉",
+        "wedding_finished": "Весілля {couple} завершено! Хай живе любов! ❤️",
+        "top_empty": "Поки що немає заручених пар.",
+        "commands_list": (
+            "/propose - зробити пропозицію руки і серця\n"
+            "/marry - почати весілля для заручених пар\n"
+            "/topcouples - показати топ пар і скільки часу разом\n"
+            "/divorce - розвезтись зі своєю половинкою\n"
+            "/commands - показати цей список команд\n"
+        ),
         "help_dm": (
             "Вітання! Ось що я вмію:\n"
-            "/marry @username — одружитись з користувачем 👰🤵\n"
-            "/topcouples — показати топ пар 🥇\n"
-            "/divorce — розвезтись 💔\n"
-            "/profile — подивитись свій профіль 🕵️‍♂️\n"
-            "/commands — показати список команд 📋\n"
+            "/propose — зробити пропозицію\n"
+            "/marry — почати весілля\n"
+            "/topcouples — показати топ пар\n"
+            "/divorce — розвезтись зі своєю половинкою\n"
+            "/commands — показати список команд\n"
             "\nТех. підтримка: @KR_LVXH"
         ),
-        "commands_list": (
-            "📜 Ось що я вмію:\n"
-            "/marry @username — одружитись з користувачем 👰🤵\n"
-            "/topcouples — показати топ пар 🥇\n"
-            "/divorce — розвезтись 💔\n"
-            "/profile — подивитись свій профіль 🕵️‍♂️\n"
-            "/commands — показати список команд 📋\n"
-        ),
-        "already_married": "❌ Ви або ваш партнер вже одружені.",
-        "not_found": "😢 Не можу знайти користувача в чаті.",
-        "self_marry": "🙅‍♂️ Не можна одружитись з самим собою!",
-        "marriage_start": "💒 {couple} починають весілля! 🎉",
-        "wedding_messages": [
-            "🎶 Звучить весільний марш... 🎶",
-            "Друзі та родина зібралися, щоб привітати {couple}!",
-            "Нехай ваше життя буде сповнене любові та щастя! 🌹",
-            "Піднімемо келихи за молодят! 🥂",
-            "Танці, сміх і радість заповнюють цей день! 💃🕺",
-            "Нехай цей день запам’ятається назавжди! 🎆"
-        ],
-        "wedding_finished": "🎊 Весілля {couple} завершено! Хай живе любов! ❤️",
-        "top_empty": "🤷‍♂️ Поки що немає заручених пар.",
-        "top_list_header": "🔥 Топ пар в групі:\n\n",
-        "divorce_no_spouse": "❌ Ви не одружені, щоб розвезтись.",
-        "divorce_success": "💔 {user1} та {user2} тепер розведені. Нехай шлях буде світлим і новим!",
-        "profile_no_marriage": "🕵️‍♂️ Профіль доступний лише одруженим. Спершу одружіться через /marry.",
-        "profile_header": "📇 Ваш профіль:\n",
-        "profile_status": "Статус: {status}\n",
-        "profile_married_to": "Одружений(а) з: {partner}\n",
-        "profile_married_since": "Одружені з: {since}\n"
+        "proposal_sent": "Пропозицію відправлено!",
+        "divorce_no_spouse": "Ви не одружені, щоб розвезтись.",
+        "divorce_success": "💔 {user1} та {user2} тепер розведені. Нехай шлях буде світлим і новим!"
     }
 }
 
@@ -59,7 +86,6 @@ def format_duration(start_time: datetime):
     now = datetime.now()
     diff = now - start_time
     minutes = int(diff.total_seconds() // 60)
-
     if minutes < 60:
         return f"{minutes} хвилин"
     hours = minutes // 60
@@ -74,195 +100,222 @@ def format_duration(start_time: datetime):
     years = months // 12
     return f"{years} років"
 
-async def get_user_name(chat_id: int, user_id: int):
-    try:
-        member = await bot.get_chat_member(chat_id, user_id)
-        return member.user.full_name
-    except:
-        return f"Користувач {user_id}"
+pending_proposals = {}
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
-    conn = get_db(message.chat.id)
-    c = conn.cursor()
-    lang, _ = get_lang_status(c, message.from_user.id)
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    lang = get_lang(chat_id, user_id)
     await message.answer(MESSAGES[lang]["help_dm"])
-    conn.close()
 
 @dp.message(Command("commands"))
 async def cmd_commands(message: Message):
-    conn = get_db(message.chat.id)
-    c = conn.cursor()
-    lang, _ = get_lang_status(c, message.from_user.id)
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    lang = get_lang(chat_id, user_id)
     await message.answer(MESSAGES[lang]["commands_list"])
-    conn.close()
+
+@dp.message(Command("propose"))
+async def cmd_propose(message: Message):
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    lang = get_lang(chat_id, user_id)
+
+    text = message.text or ""
+    parts = text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.reply("Вкажи користувача, якому робиш пропозицію, через @username")
+        return
+
+    username = parts[1].lstrip("@").strip()
+    if username.lower() == (message.from_user.username or "").lower():
+        await message.reply(MESSAGES[lang]["self_propose"])
+        return
+
+    proposal_id = f"{chat_id}_{message.message_id}"
+    proposer = message.from_user
+    proposee_mention = f"@{username}"
+
+    text = MESSAGES[lang]["proposal_offer"].format(target=proposee_mention, proposer=proposer.full_name)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅", callback_data=f"proposal_accept:{proposal_id}:{proposer.id}:{username}:{chat_id}"),
+            InlineKeyboardButton(text="❌", callback_data=f"proposal_decline:{proposal_id}:{proposer.id}:{username}:{chat_id}")
+        ]
+    ])
+    await message.answer(text, reply_markup=kb)
+    pending_proposals[proposal_id] = (proposer.id, username, chat_id)
+    await message.reply(MESSAGES[lang]["proposal_sent"])
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("proposal_"))
+async def proposal_callback(call: CallbackQuery):
+    data = call.data.split(":")
+    action = data[0].split("_")[1]
+    proposal_id = data[1]
+    proposer_id = int(data[2])
+    username = data[3]
+    chat_id = int(data[4])
+
+    lang = get_lang(chat_id, call.from_user.id)
+    proposer_accepted = (action == "accept")
+
+    if call.from_user.username != username:
+        await call.answer("Це не ваша пропозиція!", show_alert=True)
+        return
+
+    if proposal_id not in pending_proposals:
+        await call.answer("Ця пропозиція вже оброблена.", show_alert=True)
+        return
+
+    if proposer_accepted:
+        user1_id = min(proposer_id, call.from_user.id)
+        user2_id = max(proposer_id, call.from_user.id)
+        now_str = datetime.now().isoformat()
+        try:
+            c.execute('INSERT INTO couples (chat_id, user1_id, user2_id, wed_date) VALUES (?, ?, ?, ?)', (chat_id, user1_id, user2_id, now_str))
+            conn.commit()
+        except sqlite3.IntegrityError:
+            pass
+
+        user1_chat = await bot.get_chat(user1_id)
+        user2_chat = await bot.get_chat(user2_id)
+        couple_name = f"[{user1_chat.first_name}](tg://user?id={user1_id}) і [{user2_chat.first_name}](tg://user?id={user2_id})"
+
+        text = MESSAGES[lang]["proposal_accepted"].format(couple=couple_name)
+        await call.message.edit_text(text, parse_mode="Markdown")
+        pending_proposals.pop(proposal_id, None)
+    else:
+        text = MESSAGES[lang]["proposal_declined"].format(target=call.from_user.full_name, proposer=f"@{pending_proposals[proposal_id][1]}")
+        await call.message.edit_text(text)
+        pending_proposals.pop(proposal_id, None)
+
+    await call.answer()
 
 @dp.message(Command("marry"))
 async def cmd_marry(message: Message):
-    conn = get_db(message.chat.id)
-    c = conn.cursor()
-    lang, _ = get_lang_status(c, message.from_user.id)
-    
-    parts = message.text.split(maxsplit=1)
-    if len(parts) < 2:
-        await message.reply("Щоб одружитись, використай: /marry @username")
-        conn.close()
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    lang = get_lang(chat_id, user_id)
+
+    c.execute('SELECT user1_id, user2_id, wed_date FROM couples WHERE chat_id = ? AND (user1_id = ? OR user2_id = ?)', (chat_id, user_id, user_id))
+    result = c.fetchone()
+
+    if not result:
+        await message.reply(MESSAGES[lang]["not_engaged_for_marry"])
         return
-    
-    username = parts[1].lstrip("@").strip()
-    if username.lower() == (message.from_user.username or "").lower():
-        await message.reply(MESSAGES[lang]["self_marry"])
-        conn.close()
+
+    if getattr(dp, "marriage_active", False):
+        await message.reply(MESSAGES[lang]["wedding_in_progress"])
         return
-    
-    # Шукаємо user_id по username (через get_chat_member)
+
+    dp.marriage_active = True
+    user1_id, user2_id, wed_date = result
+
     try:
-        chat_members = await bot.get_chat_administrators(message.chat.id)
-        target_user = None
-        for member in chat_members:
-            if member.user.username and member.user.username.lower() == username.lower():
-                target_user = member.user
-                break
-        if not target_user:
-            await message.reply(MESSAGES[lang]["not_found"])
-            conn.close()
-            return
+        user1 = await bot.get_chat(user1_id)
+        user2 = await bot.get_chat(user2_id)
+        couple_name = f"[{user1.first_name}](tg://user?id={user1_id}) і [{user2.first_name}](tg://user?id={user2_id})"
     except Exception:
-        await message.reply(MESSAGES[lang]["not_found"])
-        conn.close()
-        return
+        couple_name = f"Користувачі {user1_id} і {user2_id}"
 
-    author_id = message.from_user.id
-    target_id = target_user.id
+    await message.answer(MESSAGES[lang]["wedding_start"].format(couple=couple_name), parse_mode="Markdown")
 
-    # Перевіряємо чи вже одружені
-    couple_author = get_couple(conn, author_id)
-    couple_target = get_couple(conn, target_id)
+    wedding_messages = [
+        "🎶 Звучить весільний марш... 🎶",
+        f"Друзі та родина зібралися, щоб привітати {couple_name}!",
+        "Нехай ваше життя буде сповнене любові та щастя!",
+        "Піднімемо келихи за молодят! 🥂",
+        "Танці, сміх і радість заповнюють цей день! 💃🕺",
+        "Нехай цей день запам’ятається назавжди! 🎆"
+    ]
 
-    if couple_author or couple_target:
-        await message.reply(MESSAGES[lang]["already_married"])
-        conn.close()
-        return
-
-    # Додаємо пару, запускаємо весілля
-    add_couple(conn, author_id, target_id)
-
-    user1_name = message.from_user.full_name
-    user2_name = target_user.full_name
-    couple_name = f"[{user1_name}](tg://user?id={author_id}) і [{user2_name}](tg://user?id={target_id})"
-
-    await message.answer(MESSAGES[lang]["marriage_start"].format(couple=couple_name), parse_mode="Markdown")
-
-    for msg_text in MESSAGES[lang]["wedding_messages"]:
-        await message.answer(msg_text.format(couple=couple_name), parse_mode="Markdown")
+    for msg_text in wedding_messages:
+        await message.answer(msg_text, parse_mode="Markdown")
         await asyncio.sleep(4)
 
-    update_status_married(conn, author_id, target_id)
-
+    dp.marriage_active = False
     await message.answer(MESSAGES[lang]["wedding_finished"].format(couple=couple_name), parse_mode="Markdown")
-    conn.close()
 
 @dp.message(Command("topcouples"))
 async def cmd_topcouples(message: Message):
-    conn = get_db(message.chat.id)
-    c = conn.cursor()
-    lang, _ = get_lang_status(c, message.from_user.id)
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    lang = get_lang(chat_id, user_id)
 
-    c.execute('SELECT user1_id, user2_id, wed_date FROM couples')
+    c.execute("SELECT user1_id, user2_id, wed_date FROM couples WHERE chat_id = ?", (chat_id,))
     rows = c.fetchall()
 
     if not rows:
-        await message.answer(MESSAGES[lang]["top_empty"])
-        conn.close()
+        await message.reply(MESSAGES[lang]["top_empty"])
         return
 
-    result_text = MESSAGES[lang]["top_list_header"]
-
+    couples_info = []
     for user1_id, user2_id, wed_date_str in rows:
         wed_date = datetime.fromisoformat(wed_date_str)
         duration = format_duration(wed_date)
-        user1_name = await get_user_name(message.chat.id, user1_id)
-        user2_name = await get_user_name(message.chat.id, user2_id)
-        couple_name = f"{user1_name} ❤️ {user2_name}"
-        result_text += f"{couple_name} — разом вже {duration}\n"
 
-    await message.answer(result_text)
-    conn.close()
+        try:
+            user1 = await bot.get_chat(user1_id)
+            user2 = await bot.get_chat(user2_id)
+            couple_name = f"{user1.first_name} і {user2.first_name}"
+        except Exception:
+            couple_name = f"Пара {user1_id} і {user2_id}"
+
+        couples_info.append((couple_name, wed_date, duration))
+
+    couples_info.sort(key=lambda x: x[1])
+
+    text_lines = ["🌹 Топ закоханих пар:"]
+    for name, _, duration in couples_info:
+        text_lines.append(f"💑 {name} — разом вже {duration}")
+
+    await message.answer("\n".join(text_lines))
 
 @dp.message(Command("divorce"))
 async def cmd_divorce(message: Message):
-    conn = get_db(message.chat.id)
-    c = conn.cursor()
-    lang, _ = get_lang_status(c, message.from_user.id)
+    chat_id = message.chat.id
     user_id = message.from_user.id
+    lang = get_lang(chat_id, user_id)
 
-    c.execute('SELECT user1_id, user2_id FROM couples WHERE user1_id = ? OR user2_id = ?', (user_id, user_id))
-    row = c.fetchone()
+    c.execute("SELECT user1_id, user2_id FROM couples WHERE chat_id = ? AND (user1_id = ? OR user2_id = ?)", (chat_id, user_id, user_id))
+    couple = c.fetchone()
 
-    if not row:
-        await message.answer(MESSAGES[lang]["divorce_no_spouse"])
-        conn.close()
+    if not couple:
+        await message.reply(MESSAGES[lang]["divorce_no_spouse"])
         return
 
-    user1_id, user2_id = row
-    delete_couple(conn, user1_id, user2_id)
-    update_status_free(conn, (user1_id, user2_id))
+    user1_id, user2_id = couple
 
-    user1_name = await get_user_name(message.chat.id, user1_id)
-    user2_name = await get_user_name(message.chat.id, user2_id)
+    try:
+        user1 = await bot.get_chat(user1_id)
+        user2 = await bot.get_chat(user2_id)
+        user1_name = user1.first_name
+        user2_name = user2.first_name
+    except Exception:
+        user1_name = f"User {user1_id}"
+        user2_name = f"User {user2_id}"
+
+    c.execute("DELETE FROM couples WHERE chat_id = ? AND user1_id = ? AND user2_id = ?", (chat_id, user1_id, user2_id))
+    conn.commit()
 
     await message.answer(MESSAGES[lang]["divorce_success"].format(user1=user1_name, user2=user2_name))
-    conn.close()
-
-@dp.message(Command("profile"))
-async def cmd_profile(message: Message):
-    conn = get_db(message.chat.id)
-    c = conn.cursor()
-    lang, status = get_lang_status(c, message.from_user.id)
-    user_id = message.from_user.id
-
-    if status != "Одружений(а)":
-        await message.answer(MESSAGES[lang]["profile_no_marriage"])
-        conn.close()
-        return
-
-    c.execute('SELECT user1_id, user2_id, wed_date FROM couples WHERE user1_id = ? OR user2_id = ?', (user_id, user_id))
-    row = c.fetchone()
-    if not row:
-        await message.answer(MESSAGES[lang]["profile_no_marriage"])
-        conn.close()
-        return
-
-    user1_id, user2_id, wed_date_str = row
-    wed_date = datetime.fromisoformat(wed_date_str)
-    spouse_id = user2_id if user1_id == user_id else user1_id
-    spouse_name = await get_user_name(message.chat.id, spouse_id)
-
-    profile_text = (
-        MESSAGES[lang]["profile_header"] +
-        MESSAGES[lang]["profile_status"].format(status=status) +
-        MESSAGES[lang]["profile_married_to"].format(partner=spouse_name) +
-        MESSAGES[lang]["profile_married_since"].format(since=wed_date.strftime("%d.%m.%Y"))
-    )
-
-    await message.answer(profile_text)
-    conn.close()
 
 async def set_bot_commands():
     commands = [
-        BotCommand(command="start", description="Стартувати бота"),
-        BotCommand(command="commands", description="Показати команди"),
-        BotCommand(command="marry", description="Одружитись з користувачем"),
-        BotCommand(command="topcouples", description="Топ пар"),
-        BotCommand(command="divorce", description="Розвезтись"),
-        BotCommand(command="profile", description="Подивитись профіль"),
+        BotCommand(command="start", description="Почати спілкування з ботом"),
+        BotCommand(command="propose", description="Зробити пропозицію руки і серця"),
+        BotCommand(command="marry", description="Почати весілля для заручених пар"),
+        BotCommand(command="topcouples", description="Показати топ пар"),
+        BotCommand(command="divorce", description="Розвезтись зі своєю половинкою"),
+        BotCommand(command="commands", description="Показати список команд"),
     ]
     await bot.set_my_commands(commands)
 
 async def main():
     await set_bot_commands()
+    print("Бот запускається, тримайся 💍✨...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    keep_alive()
     asyncio.run(main())
